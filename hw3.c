@@ -12,12 +12,14 @@
 #include <sys/shm.h>
 #include <ctype.h>
 #include <fcntl.h>
+#include <errno.h>
 
 #define F_CONNECTING 0
 #define F_READING 1
 #define F_WRITING 2
 #define F_DONE 3
 #define MaxClientNum 5
+#define MaxCommandLen 15000
 
 int linelen(int fd,char *ptr,int maxlen);
 void clean_array(char array[],int size);
@@ -26,6 +28,7 @@ int main(int argc, char* argv[], char *envp[])
 	char ip[MaxClientNum][50];
 	char port[MaxClientNum][20];
 	char file[MaxClientNum][20];
+	int conn=0;
 	for(int i=0;i<MaxClientNum;i++){
 		clean_array(ip[i],50);
 		clean_array(port[i],20);
@@ -33,6 +36,16 @@ int main(int argc, char* argv[], char *envp[])
 	}
 	
 	char *queryString=getenv("QUERY_STRING");
+	setenv("REQUEST_METHOD","GET",1);
+	setenv("SCRIPT_NAME","/net/gcs/104/0456115/public_html/hello.cgi",1);
+	setenv("REMOTE_HOST","nplinux0.cs.nctu.edu.tw",1);
+	setenv("REMOTE_ADDR","140.113.216.139",1);
+	setenv("CONTENT_LENGTH","15000",1);
+	setenv("AUTH_TYPE","http",1);
+	setenv("REMOTE_USER","Jian_De",1);
+	setenv("REMOTE_IDENT","Jian_De",1);
+	
+	
 	char *temp;
 	temp=strtok(queryString,"&");
 	
@@ -84,15 +97,19 @@ int main(int argc, char* argv[], char *envp[])
 			int flag = fcntl(csock[i],F_GETFL,0);
 			fcntl(csock[i],F_SETFL,flag|O_NONBLOCK);
 			
-			connect(csock[i],(struct sockaddr *)&dest[i],sizeof(dest[i]));
+			if(connect(csock[i],(struct sockaddr *)&dest[i],sizeof(dest[i]))==-1){
+				if(errno != EINPROGRESS){
+					printf("connect error");
+					close(csock[i]);
+					csock[i]=-1;
+				}
+			}
 			
+			conn++;
 		}
 	}
 	
 	//****************************************start I/O*************************************************************
-	
-	
-	
 	
 	char* s = "Test CGI";
 	
@@ -114,11 +131,114 @@ int main(int argc, char* argv[], char *envp[])
 			}
 		printf("</tr>\n");
 		
+		printf("<tr>\n");
+			for(int i=0;i<MaxClientNum;i++){
+				printf("<td valign=\"top\" id=\"m%d\"></td>", i);
+			}
+		printf("</tr>\n");
 		printf("</table>\n");
-	printf("<body>\n");
-	printf("<h2>%s</h2>", s);
-	printf("</body>");
-	printf("</html>");
+	int nfds;
+	int status[MaxClientNum];
+	fd_set rfds; /* readable file descriptors*/
+	fd_set wfds; /* writable file descriptors*/
+	fd_set rs;   /* active file descriptors*/
+	fd_set ws;   /* active file descriptors*/
+	
+	FD_ZERO(&rfds);
+	FD_ZERO(&wfds);
+	FD_ZERO(&rs);
+	FD_ZERO(&ws);
+	
+	nfds=getdtablesize();
+	
+	for(int i=0;i<MaxClientNum;i++){
+		if(csock[i]!=-1){
+			status[i]=F_CONNECTING;
+			FD_SET(csock[i],&rfds);
+			FD_SET(csock[i],&wfds);
+			conn++;
+		}
+		else{
+			status[i]= F_DONE;
+		}
+	}
+	
+	while(conn > 0){
+		memcpy(&rfds,&rs,sizeof(rfds));
+		memcpy(&wfds,&ws,sizeof(wfds));
+		
+		select(nfds,&rfds,&wfds,(fd_set *)NULL,(struct timeval *)NULL);
+		
+		for(int i=0;i<MaxClientNum;i++){
+			int n=sizeof(errno);
+			if(status[i]==F_CONNECTING && ( FD_ISSET(csock[i], &rfds) || FD_ISSET(csock[i], &wfds) )){
+				
+				if(getsockopt(csock[i],SOL_SOCKET,SO_ERROR,&errno,&n)<0 || errno!=0){
+					return (-1);
+				}
+				status[i]=F_READING;
+				FD_CLR(csock[i],&ws);
+			}
+			else if(status[i]==F_WRITING && FD_ISSET(csock[i],&wfds)){
+				char command[MaxCommandLen];
+				clean_array(command,MaxCommandLen);
+				if(linelen(file_fd[i],command,MaxCommandLen) < 0){
+					write(csock[i],command,strlen(command));
+					
+					strtok(command,"\r\n");
+					
+					printf("<script>document.all['m%d'].innerHTML += \"%% <b>%s</b><br>\";</script>\n", i, command);
+					fflush(stdout);
+					
+					if(strcmp(command,"exit")==0){
+						status[i]=F_DONE;
+						FD_CLR(csock[i],&ws);
+						conn--;
+					}
+					else{
+						status[i]=F_READING;
+						FD_CLR(csock[i],&ws);
+						FD_SET(csock[i],&rs);
+					}
+				}
+				else{
+					fprintf(stderr,"Command error\n");
+					fflush(stderr);
+				}
+			}
+			else if(status[i]==F_READING && FD_ISSET(csock[i],&rfds)){
+				char ResultFromServer[MaxCommandLen];
+				clean_array(ResultFromServer,MaxCommandLen);
+				
+				if(linelen(csock[i],ResultFromServer,MaxCommandLen) > 0){
+					
+					strtok(ResultFromServer,"\r\n");
+					
+					if(strstr(ResultFromServer,"%")!=NULL){
+						status[i]=F_WRITING;
+						FD_CLR(csock[i],&rs);
+						FD_SET(csock[i],&ws);
+					}
+					else{
+						printf("<script>document.all['m%d'].innerHTML += \"%s<br>\";</script>\n", i, ResultFromServer);
+						fflush(stdout);
+					}
+				}
+				else{
+					fprintf(stderr,"Read error\n");
+					fflush(stderr);
+				}
+			}
+		}
+	}
+	
+		
+		
+	printf("</font>\n");
+	printf("</body>\n");
+	printf("</html>\n");
+	
+	return 0;
 }
 int linelen(int fd,char *ptr,int maxlen)
 {
