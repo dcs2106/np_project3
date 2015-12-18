@@ -18,8 +18,9 @@
 #define F_READING 1
 #define F_WRITING 2
 #define F_DONE 3
+
 #define MaxClientNum 5
-#define MaxCommandLen 15000
+#define MaxCommandLen 1024
 
 int linelen(int fd,char *ptr,int maxlen);
 void clean_array(char array[],int size);
@@ -82,30 +83,37 @@ int main(int argc, char* argv[], char *envp[])
 		csock[i]=-1;
 		
 		if(strcmp(ip[i],"")!=0 && strcmp(port[i],"")!=0 && strcmp(file[i],"")!=0 ){
-			char filepath[100];
-			strcpy(filepath,"/net/gcs/104/0456115/");
-			strcat(filepath,file[i]);
+			char filepath[MaxCommandLen];
+			clean_array(filepath,MaxCommandLen);
+			strcpy(filepath,file[i]);
 			
 			file_fd[i]=open(filepath,O_RDONLY);
 			
-			bzero(&dest[i],sizeof(dest[i]));
-			dest[i].sin_family = AF_INET;
-			dest[i].sin_addr.s_addr = INADDR_ANY ;
-			dest[i].sin_port = htons(atoi(port[i]));
-			
-			csock[i] = socket(AF_INET,SOCK_STREAM,0);
-			int flag = fcntl(csock[i],F_GETFL,0);
-			fcntl(csock[i],F_SETFL,flag|O_NONBLOCK);
-			
-			if(connect(csock[i],(struct sockaddr *)&dest[i],sizeof(dest[i]))==-1){
-				if(errno != EINPROGRESS){
-					printf("connect error");
-					close(csock[i]);
-					csock[i]=-1;
+			if(file_fd[i]!=-1){
+				struct hostent *host;
+				host = gethostbyname(ip[i]);
+				
+				bzero(&dest[i],sizeof(dest[i]));
+				dest[i].sin_family = AF_INET;
+				dest[i].sin_addr= *((struct in_addr *)host->h_addr);
+				dest[i].sin_port = htons(atoi(port[i]));
+				
+				csock[i] = socket(AF_INET,SOCK_STREAM,0);
+				int flag = fcntl(csock[i],F_GETFL,0);
+				fcntl(csock[i],F_SETFL, flag | O_NONBLOCK);
+				
+				if(connect(csock[i],(struct sockaddr *)&dest[i],sizeof(dest[i]))==-1){
+					if(errno != EINPROGRESS){
+						printf("connect error");
+						close(csock[i]);
+						csock[i]=-1;
+					}
 				}
 			}
-			
-			conn++;
+			else{
+				fprintf(stderr, "File '%s' open failed\n", file[i]);
+                fflush(stderr);
+			}
 		}
 	}
 	
@@ -127,7 +135,7 @@ int main(int argc, char* argv[], char *envp[])
 	
 		printf("<tr>\n");
 			for(int i=0;i<MaxClientNum;i++){
-				printf("<td>%s</td>",ip[i]);
+				printf("<td>%s</td>\n",ip[i]);
 			}
 		printf("</tr>\n");
 		
@@ -154,14 +162,15 @@ int main(int argc, char* argv[], char *envp[])
 	for(int i=0;i<MaxClientNum;i++){
 		if(csock[i]!=-1){
 			status[i]=F_CONNECTING;
-			FD_SET(csock[i],&rfds);
-			FD_SET(csock[i],&wfds);
+			FD_SET(csock[i],&rs);
+			FD_SET(csock[i],&ws);
 			conn++;
 		}
 		else{
 			status[i]= F_DONE;
 		}
 	}
+	
 	
 	while(conn > 0){
 		memcpy(&rfds,&rs,sizeof(rfds));
@@ -170,11 +179,10 @@ int main(int argc, char* argv[], char *envp[])
 		select(nfds,&rfds,&wfds,(fd_set *)NULL,(struct timeval *)NULL);
 		
 		for(int i=0;i<MaxClientNum;i++){
-			int n=sizeof(errno);
 			if(status[i]==F_CONNECTING && ( FD_ISSET(csock[i], &rfds) || FD_ISSET(csock[i], &wfds) )){
-				
+				int n=sizeof(errno);
 				if(getsockopt(csock[i],SOL_SOCKET,SO_ERROR,&errno,&n)<0 || errno!=0){
-					return (-1);
+					return -1;
 				}
 				status[i]=F_READING;
 				FD_CLR(csock[i],&ws);
@@ -182,7 +190,7 @@ int main(int argc, char* argv[], char *envp[])
 			else if(status[i]==F_WRITING && FD_ISSET(csock[i],&wfds)){
 				char command[MaxCommandLen];
 				clean_array(command,MaxCommandLen);
-				if(linelen(file_fd[i],command,MaxCommandLen) < 0){
+				if(linelen(file_fd[i],command,MaxCommandLen) > 0){
 					write(csock[i],command,strlen(command));
 					
 					strtok(command,"\r\n");
@@ -210,11 +218,11 @@ int main(int argc, char* argv[], char *envp[])
 				char ResultFromServer[MaxCommandLen];
 				clean_array(ResultFromServer,MaxCommandLen);
 				
-				if(linelen(csock[i],ResultFromServer,MaxCommandLen) > 0){
+				if(linelen(csock[i],ResultFromServer,MaxCommandLen) > 0 || ( linelen(csock[i],ResultFromServer,MaxCommandLen)==-1 &&errno==EWOULDBLOCK )){
 					
 					strtok(ResultFromServer,"\r\n");
 					
-					if(strstr(ResultFromServer,"%")!=NULL){
+					if(strchr(ResultFromServer,'%')!=NULL){
 						status[i]=F_WRITING;
 						FD_CLR(csock[i],&rs);
 						FD_SET(csock[i],&ws);
@@ -231,7 +239,6 @@ int main(int argc, char* argv[], char *envp[])
 			}
 		}
 	}
-	
 		
 		
 	printf("</font>\n");
@@ -253,8 +260,7 @@ int linelen(int fd,char *ptr,int maxlen)
 			if(n==1)     return(0);
 			else         break;
 		}
-		else
-			return(-1);
+		else return(-1);
 	}
 	*ptr=0;
 	return(n);
