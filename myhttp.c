@@ -140,45 +140,6 @@ int main(int argc , char *argv[])
 	}
 	return 0;
 }
-int connectsock(char *service, char *protocol)
-{
-	int s,type;
-	struct servent *pse;
-	struct protoent *ppe;
-	struct sockaddr_in dest;
-	int portbase = 0;
-	
-	bzero((char *)&dest,sizeof(dest));
-	dest.sin_family = AF_INET;
-	dest.sin_addr.s_addr = INADDR_ANY;
-	//dest.sin_port = htons(port);
-	
-	if(pse = getservbyname(service,protocol)){
-		//dest.sin_port = htons(port);
-		dest.sin_port=htons(ntohs((u_short)pse->s_port) + portbase);
-	}
-	else if((dest.sin_port = htons((u_short)atoi(service)))==0){
-		exit(1);
-	}
-	if((ppe = getprotobyname(protocol)) == 0){
-        fprintf(stderr, "can't get \"%s\" protocol entry\n", protocol); 
-        fflush(stderr);
-        exit(1);
-    }
-	
-	if(strcmp(protocol,"udp")==0 ) {
-		type = SOCK_DGRAM;
-	}
-	else{
-		type = SOCK_STREAM;
-	}
-	
-	s = socket(PF_INET,type,ppe->p_proto);
-	bind(s, (struct sockaddr *)&dest, sizeof(dest));
-	listen(s, MaxHost);
-	
-	return s;
-}
 int readline(int fd, char * ptr, int maxlen){ 
     int  n, rc;
     char  c; 
