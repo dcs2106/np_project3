@@ -41,7 +41,7 @@ int main(int argc, char* argv[], char *envp[])
 	setenv("SCRIPT_NAME","/net/gcs/104/0456115/public_html/hello.cgi",1);
 	setenv("REMOTE_HOST","nplinux0.cs.nctu.edu.tw",1);
 	setenv("REMOTE_ADDR","140.113.216.139",1);
-	setenv("CONTENT_LENGTH","15000",1);
+	setenv("CONTENT_LENGTH","4096",1);
 	setenv("AUTH_TYPE","http",1);
 	setenv("REMOTE_USER","Jian_De",1);
 	setenv("REMOTE_IDENT","Jian_De",1);

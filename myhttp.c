@@ -12,8 +12,10 @@
 #include <ctype.h>
 #include <fcntl.h>
 #define  MaxHost 5
-
+#define Maxlinelen 4096
 int readline(int fd, char * ptr, int maxlen);
+void clear_array(char array[],int len);
+int connectsock(char *service, char *protocol);
 int main(int argc , char *argv[])
 {
 	int port;
@@ -39,21 +41,96 @@ int main(int argc , char *argv[])
 	listen(sockfd,MaxHost);//listen
 	printf("SERVER_PORT: %d\n",port);
 	
+	struct sockaddr_in client_addr;
+	int addrlen = sizeof(client_addr);
 	
-	
-	for(;;){
-		struct sockaddr_in client_addr;
-		socklen_t addrlen = sizeof(client_addr);
-		
-		clientfd = accept(sockfd,(struct sockaddr *)&client_addr, &addrlen);
+	while(1){
+		if((clientfd = accept(sockfd,(struct sockaddr *)&client_addr, &addrlen))<0){
+			printf("accept");
+			exit(1);
+		}
 		
 		int childpid;
-		
-		if((childpid=fork()) < 0){
+		childpid=fork();
+		if(childpid==-1){
 			printf("fork error\n");
 		}
 		else if(childpid ==0){//child process
+			char buf[Maxlinelen];
+			char command[Maxlinelen];
+			char filename[Maxlinelen];
+			char querystring[Maxlinelen];
+			clear_array(command,Maxlinelen);
+			clear_array(buf,Maxlinelen);
+			clear_array(filename,Maxlinelen);
+			clear_array(querystring,Maxlinelen);
 			
+			read(clientfd,buf,Maxlinelen);
+			strcpy(command,strtok(buf,"\r\n"));
+			
+			if(strstr(command,".cgi")!=NULL){
+				if(strstr(command,"?")!=NULL){//GET http://java.csie/hello.cgi?a=b&c=d HTTP/1.1
+					char *front;
+					char *back;
+					front=strtok(command,"?");//GET.........cgi
+					back=strtok(NULL,"?");
+					strcpy(filename,strrchr(front,'/')+1);//hello.cgi
+					strcpy(querystring,strtok(back," "));//a=aa&b=bb
+				}
+				else{//GET http://java.csie/hello.cgi HTTP/1.1
+					char *front;
+					front=strrchr(command,' ');
+					strcpy(filename,strrchr(front,'/')+1);
+					strcpy(querystring,"");
+					
+				}
+				
+				setenv("QUERY_STRING",querystring,1);
+				setenv("REQUEST_METHOD","GET",1);
+				setenv("SCRIPT_NAME","/net/gcs/104/0456115/public_html/hello.cgi",1);
+				setenv("REMOTE_HOST","nplinux0.cs.nctu.edu.tw",1);
+				setenv("REMOTE_ADDR","140.113.216.139",1);
+				setenv("CONTENT_LENGTH","4096",1);
+				setenv("AUTH_TYPE","http",1);
+				setenv("REMOTE_USER","Jian_De",1);
+				setenv("REMOTE_IDENT","Jian_De",1);
+				
+				char filepath[Maxlinelen];
+				clear_array(filepath,Maxlinelen);
+				strcpy(filepath,filename);
+				
+				if(access(filepath,F_OK)==0){
+					char status[Maxlinelen];
+					clear_array(status,Maxlinelen);
+					strcpy(status,"HTTP/1.1 200 OK\r\n");//return status and then fork & exec test.cgi
+					
+					write(clientfd,status,strlen(status));
+					int cgipid;
+					cgipid=fork();
+					if(cgipid==-1){
+						printf("cgi fork error\n");
+					}
+					else if (cgipid==0){
+						dup2(clientfd,fileno(stdout));
+						
+						execl(filepath,(char *)NULL);
+						exit(1);
+					}
+					else{
+						int *status_;
+						wait(status_);
+						return 0;
+					}
+				}
+				else{
+					char status[Maxlinelen];
+					clear_array(status,Maxlinelen);
+					strcpy(status,"HTTP/1.1  404 Not Found\r\n");
+					write(clientfd,status,strlen(status));
+					close(clientfd);
+					return -1;
+				}
+			}
 		}
 		else{//parent process
 			close(sockfd);
@@ -81,3 +158,9 @@ int readline(int fd, char * ptr, int maxlen){
     
     return(n); 
 } 
+void clear_array(char array[],int len)
+{
+	for(int i=0;i<len;i++){
+		array[i]='\0';
+	}
+}
