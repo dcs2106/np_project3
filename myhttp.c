@@ -25,7 +25,7 @@ int main(int argc , char *argv[])
 	int clientfd;
 	struct sockaddr_in dest;
 	port=atoi(argv[1]);
-	
+	clearenv();
 	chdir("/net/gcs/104/0456115/np_project3");
 	
 	bzero((char *)&dest,sizeof(dest));
@@ -80,9 +80,14 @@ int main(int argc , char *argv[])
 				}
 				else{//GET http://java.csie/hello.cgi HTTP/1.1
 					char *front;
-					front=strrchr(command,' ');
+					front=strtok(command," ");//GET
+					front=strtok(NULL," ");//http://java.csie/hello.cgi
 					strcpy(filename,strrchr(front,'/')+1);
 					strcpy(querystring,"");
+					
+					//printf("cgiFileName: %s\n", filename);
+                    //printf("queryString: %s\n", querystring);
+                    //fflush(stdout);
 					
 				}
 				
@@ -129,7 +134,37 @@ int main(int argc , char *argv[])
 					strcpy(status,"HTTP/1.1  404 Not Found\r\n");
 					write(clientfd,status,strlen(status));
 					close(clientfd);
-					return -1;
+					return 0;
+				}
+			}
+			else if(strstr(command,".html")!=NULL){
+				int file_fd;
+				char *str;//GET http://java.csie/form_get.html HTTP/1.1
+				char filename[Maxlinelen];
+				str=strtok(command," ");//GET
+				str=strtok(NULL," ");//http://java.csie/form_get.html
+				
+				strcpy(filename,strrchr(str,'/')+1);
+				
+				file_fd = open(filename,O_RDONLY);
+				if(file_fd != -1){
+					char response[Maxlinelen];
+					char *status = "HTTP/1.1 200 OK\r\nContent-Type: text/html\n\n";
+					
+					write(clientfd,status,strlen(status));
+					
+					while(readline(file_fd,response,sizeof(response))){//from formget.html
+						write(clientfd,response,strlen(response));//write to browser
+					}
+					close(clientfd);
+					return 0;	
+				}
+				else{
+					char *status = "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\n\n";
+                    write(clientfd,status,strlen(status));
+
+                    close(clientfd);
+                    return 0;
 				}
 			}
 		}
